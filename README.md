@@ -57,4 +57,4 @@ API 호출, 브랜치명 파싱, 상태 변경처럼 정해진 규칙대로 동�
 
 아이디어가 떠오르면 일단 시작해봅니다. 부족한 부분은 사용하면서 발견되고, 그때 개선하면 된다고 생각합니다. 이 저장소의 Jira, Trello 스킬도 처음에는 단순한 스크립트 하나로 시작했습니다. 사용하면서 불편한 점을 하나씩 고치다 보니 지금의 형태가 되었습니다.
 
-이런 방식으로 시작해서 별도 프로젝트로 발전한 것들도 있습니다. [genai-commit](https://github.com/Seungwoo321/genai-commit)은 커밋 메시지 생성 스크립트에서 시작했고, [genai-sonar-lint](https://github.com/Seungwoo321/genai-sonar-lint)는 ESLint/SonarJS 분석 자동화에서 출발했습니다. [Wireweave](https://wireweave.ai)는 와이어프레임 DSL을 만들어보자는 아이디어에서 시작했습니다. 그 외에도 여러 사이드 프로젝트를 진행 중입니다.
+이런 방식으로 시작해서 별도 프로젝트로 발전한 것들도 있습니다. [genai-commit](https://github.com/Seungwoo321/genai-commit)은 커밋 메시지 생성 스크립트에서 시작했고, [genai-sonar-lint](https://github.com/Seungwoo321/genai-sonar-lint)는 ESLint/SonarJS 분석 자동화에서 출발했습니다. [Wireweave](https://wireweave.org)는 와이어프레임 DSL을 만들어보자는 아이디어에서 시작했습니다. 그 외에도 여러 사이드 프로젝트를 진행 중입니다.
