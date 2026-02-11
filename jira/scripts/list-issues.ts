@@ -3,8 +3,8 @@
  * Jira 티켓 목록 조회
  *
  * 사용법:
- *   npx tsx list-issues.ts --mine                     # 내 담당 티켓
- *   npx tsx list-issues.ts --assignee "이승우"        # 특정 담당자
+ *   npx tsx list-issues.ts --mine                     # 내 담당 티켓 (하위 태스크 포함)
+ *   npx tsx list-issues.ts --assignee "이승우"        # 특정 담당자 (하위 태스크 포함)
  *   npx tsx list-issues.ts --empty                    # 설명 없는 티켓
  *   npx tsx list-issues.ts --status "In Progress"    # 상태별
  *   npx tsx list-issues.ts --type Story              # 타입별
@@ -20,6 +20,10 @@
  * 출력:
  *   기본: 트리 형식
  *   --json: JSON 형식
+ *
+ * 참고:
+ *   - --mine/--assignee와 --sprint를 함께 사용할 때,
+ *     상위 티켓이 해당 스프린트에 있는 하위 태스크도 포함됩니다.
  */
 
 import {
@@ -138,6 +142,10 @@ interface IssueData {
   issuetype: string;
   updated: string;
   sprint: string | null;
+  parent?: {
+    key: string;
+    summary: string;
+  };
   subtasks?: Array<{
     key: string;
     summary: string;
@@ -173,7 +181,7 @@ function groupByStatus(issues: IssueData[]): Map<string, IssueData[]> {
 }
 
 // 이슈 그룹 출력 (상태별)
-function printStatusGroup(title: string, items: IssueData[], indent: string = ''): void {
+function printStatusGroup(title: string, items: IssueData[], baseUrl: string, indent: string = ''): void {
   if (items.length === 0) return;
 
   console.log(`${indent}${title} (${items.length}건)`);
@@ -188,13 +196,22 @@ function printStatusGroup(title: string, items: IssueData[], indent: string = ''
       ? ` 👤 ${issue.assignee}`
       : '';
 
+    // 상위 티켓 표시 (하위 태스크인 경우)
+    const parentStr = issue.parent
+      ? ` ← ${issue.parent.key}`
+      : '';
+
     // 요약 (너무 길면 자르기)
-    const summaryMax = 50;
+    const summaryMax = 45;
     const summary = issue.summary.length > summaryMax
       ? issue.summary.substring(0, summaryMax) + '...'
       : issue.summary;
 
-    console.log(`${indent}${prefix} ${issue.key}: ${summary}${assigneeStr}`);
+    // 링크
+    const link = `${baseUrl}/browse/${issue.key}`;
+
+    console.log(`${indent}${prefix} ${issue.key}: ${summary}${assigneeStr}${parentStr}`);
+    console.log(`${indent}${childPrefix}  🔗 ${link}`);
 
     // 하위 태스크 출력
     if (issue.subtasks && issue.subtasks.length > 0) {
@@ -219,7 +236,7 @@ function printStatusGroup(title: string, items: IssueData[], indent: string = ''
 }
 
 // 트리 형식 출력 (스프린트별 그룹화 지원)
-function outputTree(issues: IssueData[], total: number): void {
+function outputTree(issues: IssueData[], total: number, baseUrl: string): void {
   // 스프린트별로 그룹화
   const sprintGroups = new Map<string, IssueData[]>();
 
@@ -238,11 +255,11 @@ function outputTree(issues: IssueData[], total: number): void {
     const [, sprintIssues] = [...sprintGroups.entries()][0];
     const statusGroups = groupByStatus(sprintIssues);
 
-    printStatusGroup('🔄 진행중', statusGroups.get('inProgress')!);
-    printStatusGroup('👀 리뷰', statusGroups.get('review')!);
-    printStatusGroup('⬜ 해야 할 일', statusGroups.get('todo')!);
-    printStatusGroup('✅ 완료', statusGroups.get('done')!);
-    printStatusGroup('📌 기타', statusGroups.get('other')!);
+    printStatusGroup('🔄 진행중', statusGroups.get('inProgress')!, baseUrl);
+    printStatusGroup('👀 리뷰', statusGroups.get('review')!, baseUrl);
+    printStatusGroup('⬜ 해야 할 일', statusGroups.get('todo')!, baseUrl);
+    printStatusGroup('✅ 완료', statusGroups.get('done')!, baseUrl);
+    printStatusGroup('📌 기타', statusGroups.get('other')!, baseUrl);
   } else {
     // 스프린트가 여러 개인 경우 스프린트별로 구분
     // 스프린트 이름 정렬 (백로그는 마지막)
@@ -260,15 +277,15 @@ function outputTree(issues: IssueData[], total: number): void {
       console.log(`🏃 ${sprintName} (${sprintIssues.length}건)`);
       console.log(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`);
 
-      printStatusGroup('🔄 진행중', statusGroups.get('inProgress')!, '  ');
-      printStatusGroup('👀 리뷰', statusGroups.get('review')!, '  ');
-      printStatusGroup('⬜ 해야 할 일', statusGroups.get('todo')!, '  ');
-      printStatusGroup('✅ 완료', statusGroups.get('done')!, '  ');
-      printStatusGroup('📌 기타', statusGroups.get('other')!, '  ');
+      printStatusGroup('🔄 진행중', statusGroups.get('inProgress')!, baseUrl, '  ');
+      printStatusGroup('👀 리뷰', statusGroups.get('review')!, baseUrl, '  ');
+      printStatusGroup('⬜ 해야 할 일', statusGroups.get('todo')!, baseUrl, '  ');
+      printStatusGroup('✅ 완료', statusGroups.get('done')!, baseUrl, '  ');
+      printStatusGroup('📌 기타', statusGroups.get('other')!, baseUrl, '  ');
     }
   }
 
-  console.log('범례: ✅ 완료 | 🔄 진행중 | ⬜ 할일 | 👀 리뷰 | ❌ DROP | 👤 담당자\n');
+  console.log('범례: ✅ 완료 | 🔄 진행중 | ⬜ 할일 | 👀 리뷰 | ❌ DROP | 👤 담당자 | ← 상위티켓\n');
 }
 
 async function main() {
@@ -359,7 +376,6 @@ async function main() {
             conditions.push('sprint in closedSprints()');
             break;
           default:
-            // 특정 스프린트 이름
             conditions.push(`sprint = "${args.sprint}"`);
             break;
         }
@@ -368,7 +384,7 @@ async function main() {
       jql = conditions.join(' AND ') + ' ORDER BY updated DESC';
     }
 
-    // 조회할 필드 (subtasks, sprint 기본 포함)
+    // 조회할 필드 (subtasks, sprint, parent 기본 포함)
     const fields = [
       'summary',
       'status',
@@ -376,11 +392,55 @@ async function main() {
       'issuetype',
       'updated',
       'subtasks',
-      'customfield_10020', // Sprint 필드 (Jira Software)
+      'parent',
+      'customfield_10007', // Sprint 필드 (Jira Software)
     ];
 
     // 검색 실행
-    const issues = await searchIssues(baseUrl, auth, jql, fields, args.limit);
+    let issues = await searchIssues(baseUrl, auth, jql, fields, args.limit);
+
+    // 담당자 필터 + 스프린트 필터가 함께 있으면, 하위 태스크도 별도 조회하여 병합
+    const hasAssigneeFilter = args.mine || args.assignee;
+    if (hasAssigneeFilter && args.sprint && !args.backlog) {
+      // 하위 태스크만 조회 (스프린트 조건 없이)
+      const subtaskConditions: string[] = [`project = "${project}"`];
+
+      if (args.mine) {
+        subtaskConditions.push('assignee = currentUser()');
+      } else if (args.assignee) {
+        const member = findTeamMember(config, args.assignee);
+        if (member) {
+          subtaskConditions.push(`assignee = "${member.accountId}"`);
+        } else {
+          subtaskConditions.push(`assignee = "${args.assignee}"`);
+        }
+      }
+
+      subtaskConditions.push('issuetype = "하위 작업"');
+
+      // 상태 필터링 적용
+      if (!skipFiltering) {
+        if (includeStatuses.length > 0) {
+          const includeCondition = includeStatuses.map(s => `status = "${s}"`).join(' OR ');
+          subtaskConditions.push(`(${includeCondition})`);
+        } else if (excludeStatuses.length > 0) {
+          const excludeConditions = excludeStatuses.map(s => `status != "${s}"`).join(' AND ');
+          subtaskConditions.push(`(${excludeConditions})`);
+        }
+      }
+
+      const subtaskJql = subtaskConditions.join(' AND ') + ' ORDER BY updated DESC';
+      const subtasks = await searchIssues(baseUrl, auth, subtaskJql, fields, args.limit);
+
+      // 기존 결과에 하위 태스크 병합 (중복 제거)
+      const existingKeys = new Set(issues.map(i => i.key));
+      for (const subtask of subtasks) {
+        if (!existingKeys.has(subtask.key)) {
+          issues.push(subtask);
+          existingKeys.add(subtask.key);
+        }
+      }
+    }
 
     // 스프린트 이름 추출 헬퍼
     const getSprintName = (sprints: any[] | null): string | null => {
@@ -393,7 +453,7 @@ async function main() {
     };
 
     // 데이터 변환
-    const issueDataList: IssueData[] = issues.map((issue) => {
+    let issueDataList: IssueData[] = issues.map((issue) => {
       const issueData: IssueData = {
         key: issue.key,
         summary: issue.fields.summary,
@@ -403,8 +463,16 @@ async function main() {
           : null,
         issuetype: issue.fields.issuetype.name,
         updated: issue.fields.updated,
-        sprint: getSprintName(issue.fields.customfield_10020),
+        sprint: getSprintName(issue.fields.customfield_10007),
       };
+
+      // parent가 있으면 포함 (하위 태스크인 경우)
+      if (issue.fields.parent) {
+        issueData.parent = {
+          key: issue.fields.parent.key,
+          summary: issue.fields.parent.fields?.summary || '',
+        };
+      }
 
       // subtasks가 있으면 포함
       if (issue.fields.subtasks && issue.fields.subtasks.length > 0) {
@@ -417,6 +485,73 @@ async function main() {
 
       return issueData;
     });
+
+    // 스프린트 필터가 있고 담당자 필터도 있는 경우,
+    // 하위 태스크의 상위 티켓 스프린트 정보를 조회하여 필터링
+    if (args.sprint && (args.mine || args.assignee)) {
+      // 하위 태스크들의 상위 티켓 키 수집
+      const subtasksWithParent = issueDataList.filter(
+        (issue) => issue.issuetype === '하위 작업' && issue.parent
+      );
+      const parentKeys = [...new Set(subtasksWithParent.map((s) => s.parent!.key))];
+
+      // 상위 티켓들의 스프린트 정보 조회
+      const parentSprintMap = new Map<string, string | null>();
+
+      if (parentKeys.length > 0) {
+        const parentJql = `key in (${parentKeys.map((k) => `"${k}"`).join(',')})`;
+        try {
+          const parentIssues = await searchIssues(baseUrl, auth, parentJql, ['customfield_10007'], parentKeys.length);
+
+          for (const parent of parentIssues) {
+            const sprint = parent.fields?.customfield_10007;
+            parentSprintMap.set(parent.key, getSprintName(sprint));
+          }
+        } catch (e) {
+          // 상위 티켓 조회 실패 시 무시 (하위 태스크 필터링 안함)
+          console.error('Warning: Failed to fetch parent sprint info');
+        }
+      }
+
+      // 스프린트 조건 결정
+      let targetSprintCheck: (sprint: string | null) => boolean;
+      switch (args.sprint.toLowerCase()) {
+        case 'current':
+        case 'active':
+          // 활성 스프린트에 있는지 확인 (스프린트 이름이 있으면 포함)
+          targetSprintCheck = (sprint) => sprint !== null;
+          break;
+        default:
+          // 특정 스프린트 이름과 일치하는지 확인
+          targetSprintCheck = (sprint) => sprint === args.sprint;
+          break;
+      }
+
+      // 하위 태스크 필터링
+      issueDataList = issueDataList.filter((issue) => {
+        // 하위 태스크가 아닌 경우 유지
+        if (issue.issuetype !== '하위 작업') {
+          return true;
+        }
+
+        // 하위 태스크 자체에 스프린트가 설정된 경우
+        if (issue.sprint && targetSprintCheck(issue.sprint)) {
+          return true;
+        }
+
+        // 상위 티켓의 스프린트 확인
+        if (issue.parent) {
+          const parentSprint = parentSprintMap.get(issue.parent.key);
+          if (parentSprint && targetSprintCheck(parentSprint)) {
+            // 하위 태스크에 상위의 스프린트 정보 상속
+            issue.sprint = parentSprint;
+            return true;
+          }
+        }
+
+        return false;
+      });
+    }
 
     // 출력
     if (args.json) {
@@ -436,7 +571,7 @@ async function main() {
       outputJson(output);
     } else {
       // 트리 형식 출력
-      outputTree(issueDataList, issueDataList.length);
+      outputTree(issueDataList, issueDataList.length, baseUrl);
     }
   } catch (error) {
     if ((error as JiraError).error) {
