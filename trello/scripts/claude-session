@@ -1,0 +1,87 @@
+#!/bin/bash
+# Claude Code with Trello - Auto Session Linking
+
+TRELLO_SCRIPT="$HOME/.claude-trello/trello-session.sh"
+SESSION_CONNECTED=false
+
+# 종료 시 상태 변경
+cleanup() {
+    # 연결된 세션이 있는지 확인
+    if $TRELLO_SCRIPT connect 2>/dev/null | grep -q "자동 연결됨"; then
+        SESSION_CONNECTED=true
+    fi
+
+    if [[ "$SESSION_CONNECTED" == "true" ]]; then
+        echo ""
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo "🏁 세션 종료 - Trello 상태 변경"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo "  1) 일시정지 (나중에 계속)"
+        echo "  2) 완료"
+        echo "  3) 긴급"
+        echo "  4) 유지"
+        echo "  Enter) 일시정지"
+        echo ""
+        read -t 10 -p "선택 (10초 후 자동 일시정지): " choice
+
+        case "$choice" in
+            2)
+                $TRELLO_SCRIPT status done
+                $TRELLO_SCRIPT comment "세션 종료 - 완료 처리"
+                ;;
+            3)
+                $TRELLO_SCRIPT status urgent
+                $TRELLO_SCRIPT comment "세션 종료 - 긴급으로 변경"
+                ;;
+            4)
+                echo "✓ 상태 유지"
+                ;;
+            *)
+                $TRELLO_SCRIPT status paused
+                $TRELLO_SCRIPT comment "세션 종료 - 일시정지"
+                ;;
+        esac
+    fi
+}
+
+trap cleanup EXIT
+
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "🚀 Claude Code + Trello"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+# --continue 또는 --resume이 있으면 자동 연동 시도
+if [[ "$*" == *"--continue"* ]] || [[ "$*" == *"--resume"* ]]; then
+    echo "🔄 Trello 세션 연결 시도..."
+    connect_output=$($TRELLO_SCRIPT connect 2>&1)
+
+    if echo "$connect_output" | grep -q "자동 연결됨"; then
+        SESSION_CONNECTED=true
+        echo "$connect_output"
+
+        # 세션 시작 기록
+        $TRELLO_SCRIPT comment "세션 시작 - 재개" 2>/dev/null
+
+        # 상태 변경 옵션
+        echo ""
+        echo "💡 상태 변경? (Enter=유지, u=긴급)"
+        read -t 3 -n 1 status_input
+
+        case "$status_input" in
+            u|U)
+                echo ""
+                $TRELLO_SCRIPT status urgent
+                ;;
+            *)
+                # 유지 (아무것도 안 함)
+                ;;
+        esac
+    else
+        echo "ℹ️  연결된 카드 없음 - 세션 내에서 /trello로 생성하세요"
+    fi
+fi
+
+echo ""
+
+# Claude Code 실행
+claude --dangerously-skip-permissions "$@"
