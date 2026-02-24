@@ -1,7 +1,10 @@
 ---
 name: aidlc-init
-description: AI-DLC 방법론 초기 셋팅 자동화 도구. /aidlc-init 명령으로 실행하며, 프로젝트 정보 수집 → 목적/목표 보고서 생성 → 적용방식 보고서 생성 → 프롬프트 생성 순으로 진행합니다.
+description: AI-DLC 방법론 초기 셋팅 자동화 도구. 프로젝트 정보 수집 → 목적/목표 보고서 생성 → 적용방식 보고서 생성 → 프롬프트 생성 순으로 진행합니다. Use when user mentions "aidlc", "AI-DLC", "프로젝트 초기화", "방법론 설정", "볼트 사이클", or asks to "initialize project", "setup AI-DLC", "프로젝트 셋팅", "새 프로젝트 시작".
 allowed-tools: Read, Write, Edit, Glob, Grep, Bash, AskUserQuestion
+metadata:
+  author: Seungwoo, Lee
+  version: 1.0.0
 ---
 
 # AI-DLC Initializer
