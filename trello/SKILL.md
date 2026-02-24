@@ -1,7 +1,10 @@
 ---
 name: trello
-description: Claude Code 세션을 Trello 카드와 연동합니다. 세션 생성/연결/상태변경/기록
-argument-hint: "[생성|연결|기록|제목|일시정지|완료|목록]"
+description: Claude Code 세션을 Trello 카드와 연동합니다. 세션 생성/연결/상태변경/기록. Use when user mentions "trello", "카드", "세션 기록", "작업 추적", "작업 저장", or asks to "save session", "create card", "track progress", "기록 남겨", "작업 완료 처리".
+argument-hint: "[create|connect|comment|title|pause|done|stale|list|sync|archive|locks|unlock|info]"
+metadata:
+  author: Seungwoo, Lee
+  version: 3.5.0
 ---
 
 # Trello 세션 관리
@@ -20,25 +23,31 @@ Claude Code 세션을 Trello 카드와 연동합니다.
 | 인수 | 동작 |
 |------|------|
 | (없음) | 연결 시도 → 없으면 새 카드 생성 |
-| `생성` | 대화 분석 후 자동 요약으로 새 카드 생성 |
-| `연결` | 카드 목록 표시 후 연결 |
-| `기록` | 현재 작업 내용을 코멘트로 추가 |
-| `제목` | 카드 제목 변경 (대화 분석 후 자동 생성) |
-| `일시정지` | 상태를 paused로 변경 |
-| `완료` | 상태를 done으로 변경 |
-| `목록` | 전체 카드 목록 |
+| `create` | 대화 분석 후 자동 요약으로 새 카드 생성 |
+| `connect` | 카드 목록 표시 후 연결 |
+| `comment` | 현재 작업 내용을 코멘트로 추가 |
+| `title` | 카드 제목 변경 (대화 분석 후 자동 생성) |
+| `pause` | 상태를 paused로 변경 |
+| `done` | 상태를 done으로 변경 |
+| `stale` | 상태를 stale로 변경 |
+| `list` | 전체 카드 목록 |
+| `sync` | 트렐로 기준 로컬 세션 동기화 + 미확인 상태 감지 |
+| `archive <카드ID>` | 카드 아카이브 처리 |
+| `locks` | 활성 Lock 파일 목록 |
+| `unlock` | 현재 세션 Lock 해제 |
+| `info` | 현재 세션/카드 정보 |
 
 ## 실행 절차
 
-### 1. 인수가 없거나 "연결"인 경우
+### 1. 인수가 없거나 "connect"인 경우
 
 ```bash
 ~/.claude-trello/trello-session.sh connect
 ```
 
-연결 실패 시 → "생성" 절차로 진행
+연결 실패 시 → "create" 절차로 진행
 
-### 2. "생성"인 경우
+### 2. "create"인 경우
 
 1. 현재까지의 대화 내용을 분석
 2. 작업 요약을 자동 생성 (사용자에게 물어보지 말 것!)
@@ -47,7 +56,7 @@ Claude Code 세션을 Trello 카드와 연동합니다.
 ~/.claude-trello/trello-session.sh init "자동생성된요약"
 ```
 
-### 3. "기록"인 경우
+### 3. "comment"인 경우
 
 1. 현재까지의 대화에서 주요 작업 내용 분석
 2. 코멘트 추가:
@@ -55,7 +64,7 @@ Claude Code 세션을 Trello 카드와 연동합니다.
 ~/.claude-trello/trello-session.sh comment "분석된 작업 내용"
 ```
 
-### 4. "제목"인 경우
+### 4. "title"인 경우
 
 1. 현재까지의 대화에서 작업 주제/목적 분석
 2. 제목 변경:
@@ -63,22 +72,59 @@ Claude Code 세션을 Trello 카드와 연동합니다.
 ~/.claude-trello/trello-session.sh title "분석된 작업 주제"
 ```
 
-### 5. "일시정지"인 경우
+### 5. "pause"인 경우
 
 ```bash
 ~/.claude-trello/trello-session.sh status paused
 ```
 
-### 6. "완료"인 경우
+### 6. "done"인 경우
 
 ```bash
 ~/.claude-trello/trello-session.sh status done
 ```
 
-### 7. "목록"인 경우
+### 7. "stale"인 경우
+
+```bash
+~/.claude-trello/trello-session.sh status stale
+```
+
+### 8. "list"인 경우
 
 ```bash
 ~/.claude-trello/trello-session.sh list
+```
+
+### 9. "sync"인 경우
+
+```bash
+~/.claude-trello/trello-session.sh sync
+```
+
+### 10. "archive"인 경우
+
+인수에서 카드 ID 추출 후:
+```bash
+~/.claude-trello/trello-session.sh archive <카드ID>
+```
+
+### 11. "locks"인 경우
+
+```bash
+~/.claude-trello/trello-session.sh locks
+```
+
+### 12. "unlock"인 경우
+
+```bash
+~/.claude-trello/trello-session.sh unlock
+```
+
+### 13. "info"인 경우
+
+```bash
+~/.claude-trello/trello-session.sh info
 ```
 
 ## 핵심 규칙
@@ -90,6 +136,22 @@ Claude Code 세션을 Trello 카드와 연동합니다.
    - 작업 요약 (대화 분석)
    - 세션 ID
 4. **제목은 간결하게** - `[프로젝트명] 핵심 작업 내용` 형식 유지
+
+## Lock 파일 기반 상태 추적
+
+- 세션 연결 시 `~/.claude-trello/locks/{세션ID}.lock` 자동 생성
+- `sync` 실행 시 Lock 없는 진행중 카드 → stale 상태로 이동
+- 강제 종료된 세션 감지 가능
+
+## 상태 목록
+
+| 상태 | 설명 |
+|------|------|
+| 🔴 urgent | 긴급 작업 |
+| 🟡 in_progress | 현재 작업 중 |
+| 🟢 paused | 일시 중단 |
+| 🟠 stale | Lock 없이 종료된 세션 (미확인) |
+| ✅ done | 작업 완료 |
 
 ## 코멘트 작성 규칙
 
