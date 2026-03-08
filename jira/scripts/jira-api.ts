@@ -24,20 +24,44 @@ const __dirname = dirname(__filename);
 
 // ===== Config 로드 =====
 
+function findLocalConfig(): string | null {
+  const homeDir = process.env.HOME || process.env.USERPROFILE || '';
+  let currentDir = process.cwd();
+
+  // CWD부터 홈 디렉토리까지 상위로 탐색
+  while (currentDir && currentDir !== homeDir && currentDir !== '/') {
+    const configPath = join(currentDir, '.claude', 'skills', 'jira', 'config.json');
+    if (existsSync(configPath)) {
+      return configPath;
+    }
+    const parentDir = dirname(currentDir);
+    if (parentDir === currentDir) break; // 루트 도달
+    currentDir = parentDir;
+  }
+
+  return null;
+}
+
 export function loadConfig(): JiraConfig {
-  // 1. 스킬 전용 config 확인
+  // 1. 프로젝트 로컬 config 확인 (CWD부터 홈까지 상위 탐색)
+  const localConfigPath = findLocalConfig();
+  if (localConfigPath) {
+    return JSON.parse(readFileSync(localConfigPath, 'utf-8'));
+  }
+
+  // 2. 스킬 전용 config 확인 (~/.claude/skills/jira/config.json)
   const skillConfigPath = join(__dirname, '..', 'config.json');
   if (existsSync(skillConfigPath)) {
     return JSON.parse(readFileSync(skillConfigPath, 'utf-8'));
   }
 
-  // 2. 공용 config 확인 (weekly-report와 공유)
+  // 3. 공용 config 확인
   const sharedConfigPath = join(__dirname, '..', '..', 'config.json');
   if (existsSync(sharedConfigPath)) {
     return JSON.parse(readFileSync(sharedConfigPath, 'utf-8'));
   }
 
-  throw createError('CONFIG_ERROR', 'config.json not found', `Checked: ${skillConfigPath}, ${sharedConfigPath}`);
+  throw createError('CONFIG_ERROR', 'config.json not found', `Checked: CWD hierarchy, ${skillConfigPath}, ${sharedConfigPath}`);
 }
 
 // ===== 인증 =====

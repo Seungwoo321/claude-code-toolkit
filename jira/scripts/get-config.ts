@@ -128,7 +128,31 @@ function parseArgs(): Args {
   return result;
 }
 
+function findLocalConfig(): string | null {
+  const homeDir = process.env.HOME || process.env.USERPROFILE || '';
+  let currentDir = process.cwd();
+
+  while (currentDir && currentDir !== homeDir && currentDir !== '/') {
+    const configPath = join(currentDir, '.claude', 'skills', 'jira', 'config.json');
+    if (existsSync(configPath)) {
+      return configPath;
+    }
+    const parentDir = dirname(currentDir);
+    if (parentDir === currentDir) break;
+    currentDir = parentDir;
+  }
+
+  return null;
+}
+
 function loadMinimalConfig(): MinimalConfig {
+  // 1. 프로젝트 로컬 config (CWD부터 홈까지 탐색)
+  const localConfigPath = findLocalConfig();
+  if (localConfigPath) {
+    return JSON.parse(readFileSync(localConfigPath, 'utf-8'));
+  }
+
+  // 2. 스킬 전용 config
   const configPath = join(__dirname, '..', 'config.json');
   if (existsSync(configPath)) {
     return JSON.parse(readFileSync(configPath, 'utf-8'));
