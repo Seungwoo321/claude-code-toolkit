@@ -1,5 +1,5 @@
 #!/bin/bash
-# Claude Code Session Manager for Trello v3.5
+# Claude Code Session Manager for Trello v3.6
 # 세션 ID 기반 자동 연동 지원 + Lock 파일 기반 상태 추적
 
 CONFIG_FILE="$HOME/.claude-trello/config.json"
@@ -36,18 +36,28 @@ get_project_name() {
 }
 
 # Get current Claude Code session ID
+# Searches current directory and parent directories up to $HOME,
+# then returns the most recently modified session across all candidates
 get_claude_session_id() {
-    local project_path="$(pwd)"
-    local encoded_path=$(echo "$project_path" | sed 's|[/._ ]|-|g')
-    local sessions_path="$HOME/.claude/projects/$encoded_path"
+    local search_path="$(pwd)"
 
-    if [[ -d "$sessions_path" ]]; then
-        # Get most recently modified .jsonl file
-        local latest_session=$(ls -t "$sessions_path"/*.jsonl 2>/dev/null | head -1)
-        if [[ -n "$latest_session" ]]; then
-            basename "$latest_session" .jsonl
+    while [[ "$search_path" != "/" ]]; do
+        local encoded_path=$(echo "$search_path" | sed 's|[/._ ]|-|g')
+        local sessions_path="$HOME/.claude/projects/$encoded_path"
+
+        if [[ -d "$sessions_path" ]]; then
+            local latest_session=$(ls -t "$sessions_path"/*.jsonl 2>/dev/null | head -1)
+            if [[ -n "$latest_session" ]]; then
+                basename "$latest_session" .jsonl
+                return 0
+            fi
         fi
-    fi
+
+        if [[ "$search_path" == "$HOME" ]]; then
+            break
+        fi
+        search_path=$(dirname "$search_path")
+    done
 }
 
 # Get session file path for a session ID
@@ -170,12 +180,24 @@ find_session_file() {
 }
 
 # Get card ID from current project
+# Priority: 1) session ID mapping  2) .trello-session file  3) current_session.json
 get_current_card_id() {
-    local session_file=$(find_session_file)
-    if [[ -n "$session_file" ]]; then
-        jq -r '.card_id' "$session_file"
+    # 1) Session ID based mapping (most reliable)
+    local claude_session_id=$(get_claude_session_id)
+    if [[ -n "$claude_session_id" ]]; then
+        local card_id=$(find_card_by_session_id "$claude_session_id")
+        if [[ -n "$card_id" ]] && [[ "$card_id" != "null" ]]; then
+            echo "$card_id"
+            return 0
+        fi
+    fi
+
+    # 2) .trello-session file (only if in same directory, not parent)
+    if [[ -f "$(pwd)/$PROJECT_SESSION_FILE" ]]; then
+        jq -r '.card_id' "$(pwd)/$PROJECT_SESSION_FILE"
         return 0
     fi
+
     return 1
 }
 
@@ -535,6 +557,11 @@ change_status() {
     fi
 
     update_session "$card_id" "status" "$1"
+
+    # Remove lock when session is no longer active
+    if [[ "$1" == "paused" ]] || [[ "$1" == "done" ]] || [[ "$1" == "stale" ]]; then
+        remove_lock
+    fi
 }
 
 # Change card title
@@ -699,7 +726,9 @@ sync_sessions() {
     echo ""
     echo "🔒 Lock 파일 기반 상태 검사..."
 
-    # Phase 2: Check in_progress cards without valid locks -> move to stale
+    # Phase 2: Check in_progress cards without lock files -> move to stale
+    # Lock files are created on connect/init, removed on pause/done/stale/unlock.
+    # So lock existence = active session. No need to check file age.
     local in_progress_cards=$(curl -s "$BASE_URL/lists/$LIST_IN_PROGRESS/cards?$AUTH")
     local card_count=$(echo "$in_progress_cards" | jq 'length')
 
@@ -714,24 +743,26 @@ sync_sessions() {
         if [[ -n "$card_session_id" ]]; then
             local lock_file="$LOCKS_DIR/$card_session_id.lock"
 
-            if ! is_lock_valid "$lock_file"; then
-                # No valid lock - move to stale
+            if [[ ! -f "$lock_file" ]]; then
+                # No lock file - session ended (paused/done/stale) without moving card
                 curl -s -X PUT "$BASE_URL/cards/$card_id?idList=$LIST_STALE&$AUTH" > /dev/null
-                rm -f "$lock_file"
                 ((stale++))
                 echo "🟠 미확인으로 이동: $card_name"
             fi
         fi
     done
 
-    # Phase 3: Clean up orphaned lock files
+    # Phase 3: Clean up orphaned lock files (lock exists but no matching session mapping)
     echo ""
     echo "🧹 고아 Lock 파일 정리..."
     local locks_cleaned=0
     for lock_file in "$LOCKS_DIR"/*.lock; do
         [[ -f "$lock_file" ]] || continue
 
-        if ! is_lock_valid "$lock_file"; then
+        local lock_session_id=$(basename "$lock_file" .lock)
+        local mapping_file="$SESSIONS_DIR/$lock_session_id.json"
+
+        if [[ ! -f "$mapping_file" ]]; then
             rm -f "$lock_file"
             ((locks_cleaned++))
         fi
@@ -745,6 +776,137 @@ sync_sessions() {
     echo "   - 활성: ${active}개"
     echo "   - 삭제: ${removed}개"
     echo "   미확인 이동: ${stale}개"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+}
+
+# Dedup stale cards: find stale cards whose session ID exists in in_progress/paused, comment & mark done
+dedup_stale() {
+    echo "🔍 미확인(stale) 카드 중복 검사..."
+    echo ""
+
+    # Fetch stale, in_progress, paused cards
+    local stale_cards=$(curl -s "$BASE_URL/lists/$LIST_STALE/cards?$AUTH")
+    local active_cards=$(curl -s "$BASE_URL/lists/$LIST_IN_PROGRESS/cards?$AUTH")
+    local paused_cards=$(curl -s "$BASE_URL/lists/$LIST_PAUSED/cards?$AUTH")
+
+    # Build a set of session IDs from in_progress + paused cards
+    local active_session_ids=$(echo "$active_cards" "$paused_cards" | jq -r '.[].desc' | grep -oE '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' | sort -u)
+
+    local stale_count=$(echo "$stale_cards" | jq 'length')
+    local dedup_count=0
+
+    for ((i=0; i<stale_count; i++)); do
+        local card_id=$(echo "$stale_cards" | jq -r ".[$i].id")
+        local card_name=$(echo "$stale_cards" | jq -r ".[$i].name")
+        local card_desc=$(echo "$stale_cards" | jq -r ".[$i].desc")
+
+        # Extract session ID from stale card description
+        local stale_session_id=$(echo "$card_desc" | grep -oE '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' | head -1)
+
+        if [[ -z "$stale_session_id" ]]; then
+            continue
+        fi
+
+        # Check if this session ID exists in active/paused cards
+        if echo "$active_session_ids" | grep -q "^${stale_session_id}$"; then
+            # Found duplicate - add comment and move to done
+            local comment="🔄 **중복 카드 자동 정리**\n\n이 카드의 세션 ID(\`$stale_session_id\`)가 진행중/일시정지 카드에도 존재합니다.\nLock 버그로 인한 고아 카드로 판단하여 완료 처리합니다.\n\n---\n*자동 처리: dedup 명령*"
+            local encoded_comment=$(urlencode "$comment")
+
+            curl -s -X POST "$BASE_URL/cards/$card_id/actions/comments?text=$encoded_comment&$AUTH" > /dev/null
+            curl -s -X PUT "$BASE_URL/cards/$card_id?idList=$LIST_DONE&$AUTH" > /dev/null
+            ((dedup_count++))
+            echo "✅ 중복 정리: $card_name"
+            echo "   세션 ID: $stale_session_id"
+        fi
+    done
+
+    echo ""
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "📊 중복 검사 결과"
+    echo "   미확인 카드: ${stale_count}개"
+    echo "   중복 정리: ${dedup_count}개"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+}
+
+# Recover stale cards: move verified stale cards to paused
+# A stale card is "verified" if both session mapping and transcript file exist.
+# Optional: pass card ID to recover a specific card only.
+recover_stale() {
+    local target_card_id="$1"
+    echo "🔄 미확인(stale) 카드 복구 검사..."
+    echo ""
+
+    local stale_cards=$(curl -s "$BASE_URL/lists/$LIST_STALE/cards?$AUTH")
+    local stale_count=$(echo "$stale_cards" | jq 'length')
+    local recovered=0
+    local skipped=0
+
+    for ((i=0; i<stale_count; i++)); do
+        local card_id=$(echo "$stale_cards" | jq -r ".[$i].id")
+        local card_name=$(echo "$stale_cards" | jq -r ".[$i].name")
+        local card_desc=$(echo "$stale_cards" | jq -r ".[$i].desc")
+
+        # If targeting a specific card, skip others
+        if [[ -n "$target_card_id" ]] && [[ "$card_id" != "$target_card_id" ]]; then
+            continue
+        fi
+
+        # Extract session ID from card description
+        local card_session_id=$(echo "$card_desc" | grep -oE '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' | head -1)
+
+        if [[ -z "$card_session_id" ]]; then
+            echo "⏭️  세션ID 없음 (스킵): $card_name"
+            ((skipped++))
+            continue
+        fi
+
+        # Check 1: session mapping file exists
+        local mapping_file="$SESSIONS_DIR/$card_session_id.json"
+        local has_mapping=false
+        if [[ -f "$mapping_file" ]]; then
+            has_mapping=true
+        fi
+
+        # Check 2: transcript file exists (search across all project dirs)
+        local has_transcript=false
+        for project_dir in "$HOME"/.claude/projects/*/; do
+            if [[ -f "${project_dir}${card_session_id}.jsonl" ]]; then
+                has_transcript=true
+                break
+            fi
+        done
+
+        if $has_mapping || $has_transcript; then
+            # Verified session - move to paused
+            curl -s -X PUT "$BASE_URL/cards/$card_id?idList=$LIST_PAUSED&$AUTH" > /dev/null
+
+            local reason=""
+            if $has_mapping && $has_transcript; then
+                reason="매핑+트랜스크립트 존재"
+            elif $has_mapping; then
+                reason="매핑 존재"
+            else
+                reason="트랜스크립트 존재"
+            fi
+
+            ((recovered++))
+            echo "🟢 일시정지로 복구: $card_name"
+            echo "   세션 ID: $card_session_id"
+            echo "   근거: $reason"
+        else
+            ((skipped++))
+            echo "🟠 검증 실패 (스킵): $card_name"
+            echo "   세션 ID: $card_session_id (매핑/트랜스크립트 없음)"
+        fi
+    done
+
+    echo ""
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "📊 복구 결과"
+    echo "   미확인 카드: ${stale_count}개"
+    echo "   복구 (→ 일시정지): ${recovered}개"
+    echo "   스킵: ${skipped}개"
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 }
 
@@ -813,7 +975,7 @@ list_locks() {
 
 # Show help
 show_help() {
-    echo "Claude Code Session Manager for Trello v3.5"
+    echo "Claude Code Session Manager for Trello v3.6"
     echo ""
     echo "🔑 세션 ID 기반 자동 연동:"
     echo "  ts auto                      세션 ID로 자동 카드 연결"
@@ -832,6 +994,8 @@ show_help() {
     echo "  ts status <상태>             상태 변경 (urgent/in_progress/paused/done/stale)"
     echo "  ts archive <카드ID>          카드 아카이브"
     echo "  ts sync                      트렐로 기준 로컬 세션 동기화 + 미확인 상태 감지"
+    echo "  ts dedup                     미확인 카드 중 세션ID 중복 검사 → 완료 처리"
+    echo "  ts recover [카드ID]          미확인 카드 중 정상 세션 → 일시정지로 복구"
     echo "  ts list                      전체 세션 목록"
     echo "  ts get <카드ID>              카드 상세 정보"
     echo "  ts search [세션ID]           세션 ID로 카드 검색"
@@ -882,6 +1046,12 @@ case "$1" in
         ;;
     sync)
         sync_sessions
+        ;;
+    dedup)
+        dedup_stale
+        ;;
+    recover)
+        recover_stale "$2"
         ;;
     unlock)
         remove_lock "$2"

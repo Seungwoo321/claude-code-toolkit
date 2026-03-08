@@ -1,10 +1,10 @@
 ---
 name: trello
 description: Claude Code 세션을 Trello 카드와 연동합니다. 세션 생성/연결/상태변경/기록. Use when user mentions "trello", "카드", "세션 기록", "작업 추적", "작업 저장", or asks to "save session", "create card", "track progress", "기록 남겨", "작업 완료 처리".
-argument-hint: "[create|connect|comment|title|pause|done|stale|list|sync|archive|locks|unlock|info]"
+argument-hint: "[create|connect|comment|title|pause|done|stale|list|sync|dedup|recover|archive|locks|unlock|info]"
 metadata:
   author: Seungwoo, Lee
-  version: 3.5.0
+  version: 3.6.0
 ---
 
 # Trello 세션 관리
@@ -32,6 +32,8 @@ Claude Code 세션을 Trello 카드와 연동합니다.
 | `stale` | 상태를 stale로 변경 |
 | `list` | 전체 카드 목록 |
 | `sync` | 트렐로 기준 로컬 세션 동기화 + 미확인 상태 감지 |
+| `dedup` | 미확인 카드 중 세션ID 중복 검사 → 완료 처리 |
+| `recover` | 미확인 카드 중 정상 세션 → 일시정지로 복구 |
 | `archive <카드ID>` | 카드 아카이브 처리 |
 | `locks` | 활성 Lock 파일 목록 |
 | `unlock` | 현재 세션 Lock 해제 |
@@ -102,26 +104,42 @@ Claude Code 세션을 Trello 카드와 연동합니다.
 ~/.claude-trello/trello-session.sh sync
 ```
 
-### 10. "archive"인 경우
+### 10. "dedup"인 경우
+
+미확인(stale) 카드 중 세션 ID가 진행중/일시정지 카드와 중복되는 것을 찾아 완료 처리:
+```bash
+~/.claude-trello/trello-session.sh dedup
+```
+
+### 11. "recover"인 경우
+
+미확인(stale) 카드 중 세션 매핑 또는 트랜스크립트 파일이 존재하는 정상 세션을 일시정지로 복구:
+```bash
+~/.claude-trello/trello-session.sh recover
+# 또는 특정 카드만:
+~/.claude-trello/trello-session.sh recover <카드ID>
+```
+
+### 12. "archive"인 경우
 
 인수에서 카드 ID 추출 후:
 ```bash
 ~/.claude-trello/trello-session.sh archive <카드ID>
 ```
 
-### 11. "locks"인 경우
+### 13. "locks"인 경우
 
 ```bash
 ~/.claude-trello/trello-session.sh locks
 ```
 
-### 12. "unlock"인 경우
+### 14. "unlock"인 경우
 
 ```bash
 ~/.claude-trello/trello-session.sh unlock
 ```
 
-### 13. "info"인 경우
+### 15. "info"인 경우
 
 ```bash
 ~/.claude-trello/trello-session.sh info
